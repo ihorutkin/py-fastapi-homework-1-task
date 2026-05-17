@@ -1,7 +1,7 @@
-from itertools import count
 from math import ceil
+from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -15,19 +15,16 @@ router = APIRouter()
 
 @router.get("/movies/", response_model=MovieListResponseSchema)
 async def get_all_movies(
+    db: Annotated[AsyncSession, Depends(get_db)],
     page: int = Query(1, ge=1),
     per_page: int = Query(10, ge=1, le=20),
-    db: AsyncSession = Depends(get_db),
 ):
     total_items = await db.scalar(select(func.count()).select_from(MovieModel))
 
-    if not total_items:
-        raise HTTPException(status_code=404, detail="No movies found.")
-
     total_pages = ceil(total_items / per_page)
 
-    if page > total_pages:
-        raise HTTPException(status_code=404, detail="No movies found.")
+    if not total_items or page > total_pages:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No movies found.")
 
     total_result = await db.execute(
         select(MovieModel)
@@ -47,23 +44,25 @@ async def get_all_movies(
         else None
     )
 
-    return {
-        "movies": movies,
-        "prev_page": prev_page,
-        "next_page": next_page,
-        "total_pages": total_pages,
-        "total_items": total_items,
-    }
+    return MovieListResponseSchema.model_validate(
+        {
+            "movies": movies,
+            "prev_page": prev_page,
+            "next_page": next_page,
+            "total_pages": total_pages,
+            "total_items": total_items,
+        }
+    )
 
 
 @router.get("/movies/{movie_id}/", response_model=MovieDetailResponseSchema)
-async def get_movie_by_id(movie_id: int, db: AsyncSession = Depends(get_db)):
+async def get_movie_by_id(movie_id: int, db: Annotated[AsyncSession, Depends(get_db)]):
     result = await db.execute(select(MovieModel).where(MovieModel.id == movie_id))
     movie = result.scalar_one_or_none()
 
     if not movie:
         raise HTTPException(
-            status_code=404, detail="Movie with the given ID was not found."
+            status_code=status.HTTP_404_NOT_FOUND, detail="Movie with the given ID was not found."
         )
 
     return movie
